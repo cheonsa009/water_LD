@@ -1,0 +1,68 @@
+#define WATER_SENSOR_PIN 32   // Analog pin for Grove water sensor (GPIO 32 on ESP32)
+#define LED_PIN 25            // Pin for LED
+#define BUZZER_PIN 27         // Pin for Buzzer
+
+#define SMOOTHING_FACTOR 10   // Set the number of readings for smoothing
+
+bool leakDetected = false;  // Flag to track if a water leak is detected
+int thresholdOn = 420;      // Set the threshold for detecting water (wet condition)
+int thresholdOff = 1500;    // Set the threshold for turning off the alarm (dry condition)
+int readings[SMOOTHING_FACTOR]; // Array to store sensor readings for smoothing
+int readIndex = 0;             // Index for the current reading
+int total = 0;                 // Sum of readings for averaging
+int averageReading = 0;       // Smoothed sensor value
+
+void setup() {
+  Serial.begin(115200); // Start serial communication for debugging
+
+  // Set pin modes for the sensor, LED, and buzzer
+  pinMode(WATER_SENSOR_PIN, INPUT);
+  pinMode(LED_PIN, OUTPUT);
+  pinMode(BUZZER_PIN, OUTPUT);
+
+  // Initialize readings array to 0
+  for (int i = 0; i < SMOOTHING_FACTOR; i++) {
+    readings[i] = 0;
+  }
+}
+
+void checkWaterSensor() {
+  // Remove the oldest reading from the total sum (this is the formula part)
+  total = total - readings[readIndex];
+
+  // Read the new sensor value from the Grove water sensor
+  readings[readIndex] = analogRead(WATER_SENSOR_PIN);
+
+  // Add the new reading to the total sum
+  total = total + readings[readIndex];
+
+  // Update the index for the next reading (circular buffer)
+  readIndex = (readIndex + 1) % SMOOTHING_FACTOR;
+
+  // Calculate the average of the recent readings (the formula for smoothing)
+  averageReading = total / SMOOTHING_FACTOR;  // Moving average formula
+
+  // Print the smoothed value to the Serial Monitor for debugging
+  Serial.print("Smoothed Water Sensor Value: ");
+  Serial.println(averageReading);  // Debugging line to check the smoothed value
+
+  // If the average sensor value is below thresholdOn, indicating water detection
+  if (averageReading < thresholdOn && !leakDetected) {
+    leakDetected = true; // Mark leak detected
+    digitalWrite(LED_PIN, HIGH); // Turn on LED
+    digitalWrite(BUZZER_PIN, HIGH); // Activate buzzer
+    Serial.println(">> Water leak detected!"); // Print message in Serial Monitor
+  }
+  // If the sensor value is above the thresholdOff, indicating dry condition
+  else if (averageReading > thresholdOff && leakDetected) {
+    leakDetected = false; // Reset leak detection
+    digitalWrite(LED_PIN, LOW); // Turn off LED
+    digitalWrite(BUZZER_PIN, LOW); // Deactivate buzzer
+    Serial.println(">> Sensor dry. Resetting alert."); // Print message in Serial Monitor
+  }
+}
+
+void loop() {
+  checkWaterSensor();   // Continuously check the sensor
+  delay(500);           // Delay for 0.5 seconds before the next reading
+}

@@ -4,6 +4,8 @@
 
 #include <WiFi.h>
 #include <BlynkSimpleEsp32.h>
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
 
 #define WATER_SENSOR_PIN 32
 #define LED_PIN 27         
@@ -21,10 +23,13 @@ int total = 0;
 int averageReading = 0;
 
 bool leakDetected = false;
-const int thresholdOn = 500;     
-const int thresholdOff = 1500;   
+const int thresholdOn = 500;     // Wet
+const int thresholdOff = 1500;   // Dry
 
 BlynkTimer timer;
+
+// Initialize LCD at I2C address 0x27, 16 columns and 2 rows
+LiquidCrystal_I2C lcd(0x27, 16, 2);
 
 float computeTrendSlope() {
   float sumX = 0, sumY = 0, sumXY = 0, sumXX = 0;
@@ -57,18 +62,29 @@ void checkWaterSensor() {
   Blynk.virtualWrite(V1, averageReading);
   Blynk.virtualWrite(V4, slope);
 
+  lcd.setCursor(0, 0);
+  lcd.print("Sensor:");
+  lcd.print(averageReading);
+  lcd.print("   ");
+
+  lcd.setCursor(0, 1);
   if (averageReading < thresholdOn && !leakDetected) {
     leakDetected = true;
     digitalWrite(LED_PIN, HIGH);
     digitalWrite(BUZZER_PIN, HIGH);
     Serial.println(">> Water leak detected! LED and buzzer ON.");
     Blynk.logEvent("water_leak", "🚨 Water Leak Detected! Sensor value: " + String(averageReading));
+    lcd.print("Status: LEAK! ");
   }
   else if (averageReading > thresholdOff && leakDetected) {
     leakDetected = false;
     digitalWrite(LED_PIN, LOW);
     digitalWrite(BUZZER_PIN, LOW);
     Serial.println(">> Sensor dry. LED and buzzer OFF.");
+    lcd.print("Status: Dry   ");
+  }
+  else {
+    lcd.print(leakDetected ? "Status: LEAK! " : "Status: Dry   ");
   }
 }
 
@@ -85,6 +101,15 @@ void setup() {
   for (int i = 0; i < SMOOTHING_FACTOR; i++) {
     readings[i] = 0;
   }
+
+  lcd.init();
+  lcd.backlight();
+  lcd.setCursor(0, 0);
+  lcd.print("Water Leakage");
+  lcd.setCursor(0, 1);
+  lcd.print("Detector Ready");
+  delay(2000);
+  lcd.clear();
 
   Blynk.begin(auth, ssid, pass);
 

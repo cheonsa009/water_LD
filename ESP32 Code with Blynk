@@ -1,36 +1,44 @@
+// Blynk template credentials
 #define BLYNK_TEMPLATE_ID "TMPL6IzLqMgqO"
 #define BLYNK_TEMPLATE_NAME "Water Leakage Detector"
 #define BLYNK_AUTH_TOKEN "cquzDcdpOH9UrcWeMf5jwTq2oe7NQxmX"
 
+// Required libraries for ESP32, Blynk, I2C, and LCD
 #include <WiFi.h>
 #include <BlynkSimpleEsp32.h>
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
 
-#define WATER_SENSOR_PIN 32
-#define LED_PIN 27         
-#define BUZZER_PIN 26      
+// Pin definitions
+#define WATER_SENSOR_PIN 32  // Analog input pin for the water sensor
+#define LED_PIN 27           // Digital output pin for the LED
+#define BUZZER_PIN 26        // Digital output pin for the buzzer
 
+// Blynk authentication and WiFi credentials
 char auth[] = "cquzDcdpOH9UrcWeMf5jwTq2oe7NQxmX";
 char ssid[] = "anghel";
 char pass[] = "kimpoyyy";
 
-#define SMOOTHING_FACTOR 3
+// Smoothing setup for sensor readings
+#define SMOOTHING_FACTOR 3   // Number of readings for moving average
 
-int readings[SMOOTHING_FACTOR];
-int readIndex = 0;
-int total = 0;
-int averageReading = 0;
+int readings[SMOOTHING_FACTOR]; // Array to store recent sensor values
+int readIndex = 0;              // Index for the current reading in array
+int total = 0;                  // Running total for averaging
+int averageReading = 0;         // Final smoothed sensor value
 
-bool leakDetected = false;
-const int thresholdOn = 500;     // Wet
-const int thresholdOff = 1500;   // Dry
+bool leakDetected = false;      // Flag to avoid repeated alerts
 
-BlynkTimer timer;
+// Threshold values to trigger alerts
+const int thresholdOn = 500;    // Leak detected if below this
+const int thresholdOff = 1500;  // Leak cleared if above this
 
-// Initialize LCD at I2C address 0x27, 16 columns and 2 rows
+BlynkTimer timer;               // Timer object for scheduling sensor checks
+
+// Initialize the LCD: I2C address 0x27, 16 columns x 2 rows
 LiquidCrystal_I2C lcd(0x27, 16, 2);
 
+// Function to compute slope using basic linear regression
 float computeTrendSlope() {
   float sumX = 0, sumY = 0, sumXY = 0, sumXX = 0;
   for (int i = 0; i < SMOOTHING_FACTOR; i++) {
@@ -41,82 +49,100 @@ float computeTrendSlope() {
   }
   float numerator = SMOOTHING_FACTOR * sumXY - sumX * sumY;
   float denominator = SMOOTHING_FACTOR * sumXX - sumX * sumX;
-  if (denominator == 0) return 0;
+  if (denominator == 0) return 0; // Prevent division by zero
   return numerator / denominator;
 }
 
+// Function to read sensor, compute values, and trigger actions
 void checkWaterSensor() {
+  // Update moving average with new reading
   total = total - readings[readIndex];
   readings[readIndex] = analogRead(WATER_SENSOR_PIN);
   total = total + readings[readIndex];
   readIndex = (readIndex + 1) % SMOOTHING_FACTOR;
   averageReading = total / SMOOTHING_FACTOR;
 
+  // Calculate the trend/slope of sensor readings
   float slope = computeTrendSlope();
 
+  // Debug output to Serial Monitor
   Serial.print("Smoothed Water Sensor Value: ");
   Serial.println(averageReading);
   Serial.print("Trend Slope: ");
   Serial.println(slope);
 
-  Blynk.virtualWrite(V1, averageReading);
-  Blynk.virtualWrite(V4, slope);
+  // Send values to Blynk app
+  Blynk.virtualWrite(V1, averageReading);  // Sensor value to V1
+  Blynk.virtualWrite(V4, slope);           // Slope to V4
 
+  // LCD display: Sensor value (line 0)
   lcd.setCursor(0, 0);
   lcd.print("Sensor:");
   lcd.print(averageReading);
-  lcd.print("   ");
+  lcd.print("   "); // Clear leftover digits
 
+  // LCD display and alerts (line 1)
   lcd.setCursor(0, 1);
   if (averageReading < thresholdOn && !leakDetected) {
+    // Leak detected
     leakDetected = true;
     digitalWrite(LED_PIN, HIGH);
     digitalWrite(BUZZER_PIN, HIGH);
     Serial.println(">> Water leak detected! LED and buzzer ON.");
     Blynk.logEvent("water_leak", "🚨 Water Leak Detected! Sensor value: " + String(averageReading));
     lcd.print("Status: LEAK! ");
-  }
+  } 
   else if (averageReading > thresholdOff && leakDetected) {
+    // Leak cleared
     leakDetected = false;
     digitalWrite(LED_PIN, LOW);
     digitalWrite(BUZZER_PIN, LOW);
     Serial.println(">> Sensor dry. LED and buzzer OFF.");
     lcd.print("Status: Dry   ");
-  }
+  } 
   else {
+    // Maintain current display
     lcd.print(leakDetected ? "Status: LEAK! " : "Status: Dry   ");
   }
 }
 
 void setup() {
+  // Start serial monitor
   Serial.begin(115200);
 
+  // Configure pin modes
   pinMode(WATER_SENSOR_PIN, INPUT);
   pinMode(LED_PIN, OUTPUT);
   pinMode(BUZZER_PIN, OUTPUT);
 
+  // Ensure outputs are off at startup
   digitalWrite(LED_PIN, LOW);
   digitalWrite(BUZZER_PIN, LOW);
 
+  // Initialize readings array
   for (int i = 0; i < SMOOTHING_FACTOR; i++) {
     readings[i] = 0;
   }
 
+  // Initialize the LCD screen
   lcd.init();
   lcd.backlight();
   lcd.setCursor(0, 0);
   lcd.print("Water Leakage");
   lcd.setCursor(0, 1);
   lcd.print("Detector Ready");
-  delay(2000);
+  delay(2000); // Show welcome message
   lcd.clear();
 
+  // Connect to Wi-Fi and Blynk
   Blynk.begin(auth, ssid, pass);
 
+  // Set up timer to run checkWaterSensor every 500 ms
   timer.setInterval(500L, checkWaterSensor);
 }
 
 void loop() {
+  // Handle Blynk and scheduled tasks
   Blynk.run();
   timer.run();
 }
